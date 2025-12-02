@@ -95,7 +95,7 @@ npm run dev
 ```
 
 ### 访问应用
-- **前端应用**：http://localhost:5173
+- **前端应用**：http://localhost:3000
 - **后端API**：http://localhost:8086/api
 - **API文档**：http://localhost:8086/api/doc.html
 
