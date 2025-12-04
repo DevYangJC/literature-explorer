@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.yuyuan.literature.mapper.QAHistoryMapper">
+
+    <!-- 查询会话ID列表 -->
+    <select id="selectSessionIds" resultType="java.lang.String">
+        SELECT session_id
+        FROM (
+            SELECT DISTINCT session_id, MAX(create_time) as max_time
+            FROM qa_history
+            WHERE deleted = 0
+            <if test="literatureId != null">
+                AND literature_id = #{literatureId}
+            </if>
+            GROUP BY session_id
+        )
+        ORDER BY max_time DESC
+    </select>
+
+    <!-- 查询会话详情 -->
+    <select id="selectBySessionId" resultType="com.yuyuan.literature.entity.QAHistory">
+        SELECT *
+        FROM qa_history
+        WHERE session_id = #{sessionId}
+          AND deleted = 0
+        ORDER BY sequence ASC
+    </select>
+
+    <!-- 删除会话 -->
+    <update id="deleteBySessionId">
+        UPDATE qa_history
+        SET deleted = 1
+        WHERE session_id = #{sessionId}
+    </update>
+
+</mapper>

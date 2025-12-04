@@ -15,3 +15,25 @@ CREATE TABLE IF NOT EXISTS literature
     update_time    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     deleted        TINYINT   DEFAULT 0
 );
+
+-- 问答历史表
+CREATE TABLE IF NOT EXISTS qa_history
+(
+    id              BIGINT AUTO_INCREMENT PRIMARY KEY,
+    session_id      VARCHAR(64)  NOT NULL,
+    literature_id   BIGINT,
+    question        CLOB         NOT NULL,
+    answer          CLOB         NOT NULL,
+    cross_doc       BOOLEAN   DEFAULT FALSE,
+    keyword         VARCHAR(200),
+    session_title   VARCHAR(200),
+    sequence        INT       DEFAULT 1,
+    create_time     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    update_time     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    deleted         TINYINT   DEFAULT 0
+);
+
+-- 创建索引
+CREATE INDEX IF NOT EXISTS idx_qa_session_id ON qa_history(session_id);
+CREATE INDEX IF NOT EXISTS idx_qa_literature_id ON qa_history(literature_id);
+CREATE INDEX IF NOT EXISTS idx_qa_create_time ON qa_history(create_time);

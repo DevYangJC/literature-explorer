@@ -191,9 +191,18 @@
         <template #header>
           <div class="card-header">
             <h3>💡 智能问答</h3>
-            <el-tag v-if="currentLiterature.status !== 1" type="warning" size="small">
-              需要文献完成AI分析后使用
-            </el-tag>
+            <div class="header-actions">
+              <el-button
+                size="small"
+                @click="showHistoryDialog"
+              >
+                <el-icon><Clock /></el-icon>
+                查看历史
+              </el-button>
+              <el-tag v-if="currentLiterature.status !== 1" type="warning" size="small">
+                需要文献完成AI分析后使用
+              </el-tag>
+            </div>
           </div>
         </template>
         
@@ -315,8 +324,8 @@
               </div>
             </div>
             
-            <!-- 当前问答 -->
-            <div class="answer-content">
+            <!-- 当前问答（仅在流式输出时或回答未完成时显示） -->
+            <div v-if="currentQuestion && (isStreaming || !answerComplete)" class="answer-content">
               <div class="question-box">
                 <strong>{{ qaHistory.length > 0 ? `问题 ${qaHistory.length + 1}` : '问题' }}：</strong>{{ currentQuestion }}
               </div>
@@ -340,7 +349,95 @@
     </div>
 
     <!-- 未找到文献 -->
-    <el-empty v-else description="未找到该文献" />
+    <el-empty v-else description="未找到文献" />
+
+    <!-- 历史对话弹窗 -->
+    <el-dialog
+      v-model="historyDialogVisible"
+      title="历史对话记录"
+      width="80%"
+      :close-on-click-modal="false"
+    >
+      <div class="history-dialog-content">
+        <el-tabs v-model="activeHistoryTab" type="border-card">
+          <!-- 对话列表 -->
+          <el-tab-pane label="对话列表" name="list">
+            <div v-if="loadingHistory" class="loading-container">
+              <el-skeleton :rows="5" animated />
+            </div>
+            <div v-else-if="historySessions.length === 0" class="empty-history">
+              <el-empty description="暂无对话记录" />
+            </div>
+            <div v-else class="sessions-list">
+              <div
+                v-for="session in historySessions"
+                :key="session.sessionId"
+                class="session-item"
+                @click="loadSession(session.sessionId)"
+              >
+                <div class="session-header">
+                  <div class="session-info">
+                    <h4 class="session-title">{{ session.sessionTitle }}</h4>
+                    <el-tag v-if="session.crossDoc" size="small" type="info">跨文献</el-tag>
+                    <el-tag v-else size="small" type="success">单文献</el-tag>
+                  </div>
+                  <el-button
+                    type="danger"
+                    size="small"
+                    @click.stop="deleteSession(session.sessionId)"
+                  >
+                    <el-icon><Delete /></el-icon>
+                    删除
+                  </el-button>
+                </div>
+                <div class="session-meta">
+                  <span v-if="session.literatureName" class="meta-item">
+                    <el-icon><Document /></el-icon>
+                    {{ session.literatureName }}
+                  </span>
+                  <span class="meta-item">
+                    <el-icon><ChatDotRound /></el-icon>
+                    {{ session.qaCount }} 轮对话
+                  </span>
+                  <span class="meta-item">
+                    <el-icon><Clock /></el-icon>
+                    {{ formatDateTime(session.updateTime) }}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </el-tab-pane>
+
+          <!-- 对话详情 -->
+          <el-tab-pane label="对话详情" name="detail" :disabled="!selectedSession">
+            <div v-if="selectedSession" class="session-detail">
+              <div class="detail-header">
+                <h3>{{ selectedSession.sessionTitle }}</h3>
+                <el-button size="small" @click="loadSessionToQA">
+                  <el-icon><ChatDotRound /></el-icon>
+                  继续对话
+                </el-button>
+              </div>
+              <div class="detail-records">
+                <div
+                  v-for="record in selectedSession.records"
+                  :key="record.id"
+                  class="record-item"
+                >
+                  <div class="record-question">
+                    <strong>问题 {{ record.sequence }}：</strong>{{ record.question }}
+                  </div>
+                  <div class="record-answer">
+                    <div class="markdown-content" v-html="renderMarkdown(record.answer)"></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <el-empty v-else description="请从列表中选择一个对话" />
+          </el-tab-pane>
+        </el-tabs>
+      </div>
+    </el-dialog>
   </div>
 </template>
 
@@ -348,10 +445,10 @@
 import { ref, computed, onMounted, onUnmounted, nextTick, watchEffect, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useLiteratureStore } from '@/stores/literatureStore'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { marked } from 'marked'
 import mermaid from 'mermaid'
-import { ArrowLeft, FullScreen, Close, Download, Document, ChatDotRound, Loading, CircleCheck, RefreshLeft, InfoFilled } from '@element-plus/icons-vue'
+import { ArrowLeft, FullScreen, Close, Download, Document, ChatDotRound, Loading, CircleCheck, RefreshLeft, InfoFilled, Clock, Delete } from '@element-plus/icons-vue'
 import { fetchEventSource } from '@microsoft/fetch-event-source'
 
 const route = useRoute()
@@ -381,7 +478,15 @@ const renderedAnswer = ref('')
 const qaProgressMessage = ref('')
 const qaError = ref('')
 const qaHistory = ref([]) // 对话历史
+const currentSessionId = ref('') // 当前会话ID
 let abortController = null
+
+// 历史对话相关状态
+const historyDialogVisible = ref(false)
+const activeHistoryTab = ref('list')
+const loadingHistory = ref(false)
+const historySessions = ref([])
+const selectedSession = ref(null)
 
 // API Key 存储相关
 const API_KEY_STORAGE_KEY = 'literature_assistant_api_key'
@@ -751,6 +856,9 @@ const handleQASSEEvent = (event) => {
         renderedAnswer: renderedAnswer.value
       })
       
+      // 保存到后端数据库
+      saveQAToBackend()
+      
       ElMessage.success('回答完成')
       break
 
@@ -825,6 +933,164 @@ const continueAsk = () => {
   qaProgressMessage.value = ''
   qaError.value = ''
   qaForm.value.question = '' // 清空问题输入框
+}
+
+// ==================== 历史对话功能 ====================
+
+// 保存问答到后端
+const saveQAToBackend = async () => {
+  try {
+    const response = await fetch('/api/qa-history/save', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        sessionId: currentSessionId.value || undefined,
+        question: currentQuestion.value,
+        answer: streamingAnswer.value,
+        literatureId: qaForm.value.crossDoc ? null : currentLiterature.value.id,
+        crossDoc: qaForm.value.crossDoc,
+        keyword: qaForm.value.crossDoc ? qaForm.value.question : null
+      })
+    })
+    
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`)
+    }
+    
+    const result = await response.json()
+    if (result.code === 200 && result.data) {
+      // 保存会话ID，用于继续对话
+      currentSessionId.value = result.data
+      console.log('问答记录已保存，会话ID:', currentSessionId.value)
+    }
+  } catch (error) {
+    console.error('保存问答记录失败:', error)
+    // 不弹出错误，静默处理
+  }
+}
+
+// 显示历史对话弹窗
+const showHistoryDialog = async () => {
+  historyDialogVisible.value = true
+  activeHistoryTab.value = 'list'
+  selectedSession.value = null
+  await loadHistorySessions()
+}
+
+// 加载历史会话列表
+const loadHistorySessions = async () => {
+  try {
+    loadingHistory.value = true
+    const response = await fetch(`/api/qa-history/sessions?literatureId=${currentLiterature.value?.id || ''}`)
+    
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`)
+    }
+    
+    const result = await response.json()
+    if (result.code === 200) {
+      historySessions.value = result.data || []
+    }
+  } catch (error) {
+    console.error('加载历史会话失败:', error)
+    ElMessage.error('加载历史记录失败')
+    historySessions.value = []
+  } finally {
+    loadingHistory.value = false
+  }
+}
+
+// 加载会话详情
+const loadSession = async (sessionId) => {
+  try {
+    const response = await fetch(`/api/qa-history/session/${sessionId}`)
+    
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`)
+    }
+    
+    const result = await response.json()
+    if (result.code === 200 && result.data) {
+      selectedSession.value = result.data
+      activeHistoryTab.value = 'detail'
+    }
+  } catch (error) {
+    console.error('加载会话详情失败:', error)
+    ElMessage.error('加载对话详情失败')
+  }
+}
+
+// 删除会话
+const deleteSession = async (sessionId) => {
+  try {
+    await ElMessageBox.confirm('确定要删除这个对话吗？', '提示', {
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      type: 'warning'
+    })
+    
+    const response = await fetch(`/api/qa-history/session/${sessionId}`, {
+      method: 'DELETE'
+    })
+    
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`)
+    }
+    
+    ElMessage.success('删除成功')
+    await loadHistorySessions()
+    
+    if (selectedSession.value?.sessionId === sessionId) {
+      selectedSession.value = null
+      activeHistoryTab.value = 'list'
+    }
+  } catch (error) {
+    if (error !== 'cancel') {
+      console.error('删除会话失败:', error)
+      ElMessage.error('删除失败')
+    }
+  }
+}
+
+// 加载会话到当前问答区
+ const loadSessionToQA = () => {
+  if (!selectedSession.value) return
+  
+  // 关闭弹窗
+  historyDialogVisible.value = false
+  
+  // 设置会话ID
+  currentSessionId.value = selectedSession.value.sessionId
+  
+  // 载入历史记录
+  qaHistory.value = selectedSession.value.records.map(record => ({
+    question: record.question,
+    answer: record.answer,
+    renderedAnswer: renderMarkdown(record.answer)
+  }))
+  
+  // 设置为继续问答模式
+  isAnswering.value = false
+  answerComplete.value = false
+  
+  ElMessage.success('已加载历史对话，可以继续提问')
+}
+
+// 渲染Markdown
+const renderMarkdown = (text) => {
+  if (!text) return ''
+  try {
+    marked.setOptions({
+      breaks: true,
+      gfm: true
+    })
+    return marked(text)
+  } catch (error) {
+    console.error('Markdown 渲染错误:', error)
+    return text
+  }
 }
 
 // 监听历史记录变化，渲染历史中的 Mermaid 图表
@@ -1728,5 +1994,100 @@ onUnmounted(() => {
   border: 1px solid #f0f0f0;
   max-height: 400px;
   overflow-y: auto;
+}
+
+/* 历史对话弹窗样式 */
+.history-dialog-content {
+  min-height: 500px;
+}
+
+.sessions-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.session-item {
+  padding: 16px;
+  border: 1px solid #e4e7ed;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.3s;
+}
+
+.session-item:hover {
+  border-color: #409eff;
+  background: #f5f7fa;
+  transform: translateY(-2px);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+
+.session-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.session-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.session-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 500;
+}
+
+.session-meta {
+  display: flex;
+  gap: 16px;
+  font-size: 14px;
+  color: #909399;
+}
+
+.meta-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.session-detail .detail-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 24px;
+  padding-bottom: 12px;
+  border-bottom: 2px solid #e4e7ed;
+}
+
+.detail-records {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.record-item {
+  padding: 16px;
+  background: #fafafa;
+  border-radius: 4px;
+}
+
+.record-question {
+  margin-bottom: 12px;
+  padding: 12px;
+  background: #e7f4ff;
+  border-left: 3px solid #409eff;
+  border-radius: 4px;
+  font-size: 14px;
+}
+
+.record-answer {
+  padding: 12px;
+  background: white;
+  border-radius: 4px;
+  border: 1px solid #e4e7ed;
 }
 </style>
