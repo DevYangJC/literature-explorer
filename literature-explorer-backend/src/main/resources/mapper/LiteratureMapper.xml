@@ -90,4 +90,34 @@
         </choose>
     </select>
 
+    <!-- 检索相关文献（用于问答系统） -->
+    <select id="searchRelevantLiteratures" resultType="com.yuyuan.literature.dto.LiteratureContext">
+        SELECT 
+            id AS literatureId,
+            original_name AS title,
+            description,
+            reading_guide AS readingGuide,
+            tags,
+            0.0 AS relevanceScore
+        FROM literature
+        WHERE deleted = 0
+            AND status = 1
+            AND (
+                reading_guide IS NOT NULL AND reading_guide != ''
+                OR description IS NOT NULL AND description != ''
+            )
+            <if test="keyword != null and keyword != ''">
+                AND (
+                    original_name LIKE CONCAT('%', #{keyword}, '%')
+                    OR description LIKE CONCAT('%', #{keyword}, '%')
+                    OR reading_guide LIKE CONCAT('%', #{keyword}, '%')
+                    OR tags LIKE CONCAT('%', #{keyword}, '%')
+                )
+            </if>
+        ORDER BY update_time DESC
+        <if test="topK != null and topK > 0">
+            LIMIT #{topK}
+        </if>
+    </select>
+
 </mapper>

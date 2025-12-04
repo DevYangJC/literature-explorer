@@ -5,16 +5,19 @@ import com.yuyuan.literature.common.request.PageResult;
 import com.yuyuan.literature.common.result.Result;
 import com.yuyuan.literature.dto.BatchLiteratureImportRequest;
 import com.yuyuan.literature.dto.LiteratureQueryRequest;
+import com.yuyuan.literature.dto.LiteratureQuestionRequest;
 import com.yuyuan.literature.dto.LiteratureVO;
 import com.yuyuan.literature.entity.Literature;
 import com.yuyuan.literature.service.FileProcessingService;
 import com.yuyuan.literature.service.LiteratureAiService;
+import com.yuyuan.literature.service.LiteratureQAService;
 import com.yuyuan.literature.service.LiteratureService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
@@ -47,6 +50,9 @@ public class LiteratureController {
     private final LiteratureAiService literatureAiService;
     private final LiteratureService literatureService;
 
+    @Autowired
+    private  LiteratureQAService literatureQAService;
+
     /**
      * 生成文献阅读指南
      *
@@ -57,10 +63,8 @@ public class LiteratureController {
     @PostMapping(value = "/generate-guide", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     @Operation(summary = "生成文献阅读指南", description = "上传文献文件，AI 生成阅读指南（SSE 流式响应）")
     public SseEmitter generateReadingGuide(
-            @Parameter(description = "文献文件（支持 PDF、Word、Markdown）", required = true)
-            @RequestParam("file") MultipartFile file,
-            @Parameter(description = "Kimi AI API Key", required = true)
-            @RequestParam("apiKey") @NotBlank(message = "API Key 不能为空") String apiKey) {
+            @Parameter(description = "文献文件（支持 PDF、Word、Markdown）", required = true) @RequestParam("file") MultipartFile file,
+            @Parameter(description = "Kimi AI API Key", required = true) @RequestParam("apiKey") @NotBlank(message = "API Key 不能为空") String apiKey) {
 
         log.info("开始生成文献阅读指南，文件名: {}, 文件大小: {} bytes",
                 file.getOriginalFilename(), file.getSize());
@@ -110,7 +114,8 @@ public class LiteratureController {
             }
 
             // 异步生成阅读指南（带内容收集，传递文件类型）
-            literatureAiService.generateReadingGuideStream(apiKey, fileContent, fileType, sseEmitter, readingGuideBuilder);
+            literatureAiService.generateReadingGuideStream(apiKey, fileContent, fileType, sseEmitter,
+                    readingGuideBuilder);
 
             // 设置 SSE 完成回调，在阅读指南完成后启动分类
             final String finalFilePath = filePath;
@@ -166,7 +171,6 @@ public class LiteratureController {
         return sseEmitter;
     }
 
-
     /**
      * 分页查询文献
      */
@@ -187,8 +191,7 @@ public class LiteratureController {
     @GetMapping("/{id}")
     @Operation(summary = "获取文献详情", description = "根据ID获取文献完整信息")
     public Result<LiteratureVO> getLiteratureDetail(
-            @Parameter(description = "文献ID", required = true)
-            @PathVariable @NotNull(message = "文献ID不能为空") Long id) {
+            @Parameter(description = "文献ID", required = true) @PathVariable @NotNull(message = "文献ID不能为空") Long id) {
 
         log.info("获取文献详情，ID: {}", id);
 
@@ -202,8 +205,7 @@ public class LiteratureController {
     @GetMapping("/{id}/download")
     @Operation(summary = "下载文献文件", description = "根据文献ID下载对应的原始文件")
     public void downloadLiteratureFile(
-            @Parameter(description = "文献ID", required = true)
-            @PathVariable @NotNull(message = "文献ID不能为空") Long id,
+            @Parameter(description = "文献ID", required = true) @PathVariable @NotNull(message = "文献ID不能为空") Long id,
             jakarta.servlet.http.HttpServletResponse response) {
 
         log.info("下载文献文件，ID: {}", id);
@@ -216,10 +218,8 @@ public class LiteratureController {
     @PostMapping(value = "/batch-import", consumes = MediaType.MULTIPART_FORM_DATA_VALUE, produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     @Operation(summary = "批量导入文献", description = "批量上传文献文件，AI生成阅读指南并实时返回处理状态")
     public SseEmitter batchImportLiterature(
-            @Parameter(description = "文献文件列表", required = true)
-            @RequestPart("files") List<MultipartFile> files,
-            @Parameter(description = "Kimi AI API Key", required = true)
-            @RequestParam("apiKey") @NotBlank(message = "API Key 不能为空") String apiKey) {
+            @Parameter(description = "文献文件列表", required = true) @RequestPart("files") List<MultipartFile> files,
+            @Parameter(description = "Kimi AI API Key", required = true) @RequestParam("apiKey") @NotBlank(message = "API Key 不能为空") String apiKey) {
 
         log.info("开始批量导入文献，文件数量: {}", files.size());
 
@@ -236,8 +236,7 @@ public class LiteratureController {
     @GetMapping("/{id}/export-reading-guide")
     @Operation(summary = "导出文献阅读指南", description = "根据文献ID导出阅读指南为Markdown格式")
     public void exportReadingGuideMarkdown(
-            @Parameter(description = "文献ID", required = true)
-            @PathVariable @NotNull(message = "文献ID不能为空") Long id,
+            @Parameter(description = "文献ID", required = true) @PathVariable @NotNull(message = "文献ID不能为空") Long id,
             jakarta.servlet.http.HttpServletResponse response) {
 
         log.info("导出文献阅读指南，ID: {}", id);
@@ -250,8 +249,7 @@ public class LiteratureController {
     @DeleteMapping("/{id}")
     @Operation(summary = "删除文献", description = "根据ID删除文献记录（逻辑删除）")
     public Result<Void> deleteLiterature(
-            @Parameter(description = "文献ID", required = true)
-            @PathVariable @NotNull(message = "文献ID不能为空") Long id) {
+            @Parameter(description = "文献ID", required = true) @PathVariable @NotNull(message = "文献ID不能为空") Long id) {
 
         log.info("删除文献，ID: {}", id);
 
@@ -265,8 +263,7 @@ public class LiteratureController {
     @DeleteMapping("/batch")
     @Operation(summary = "批量删除文献", description = "根据ID列表批量删除文献记录（逻辑删除）")
     public Result<Void> batchDeleteLiterature(
-            @Parameter(description = "文献ID列表", required = true)
-            @RequestBody @NotNull(message = "文献ID列表不能为空") List<Long> ids) {
+            @Parameter(description = "文献ID列表", required = true) @RequestBody @NotNull(message = "文献ID列表不能为空") List<Long> ids) {
 
         log.info("批量删除文献，ID数量: {}", ids.size());
 
@@ -281,5 +278,23 @@ public class LiteratureController {
     @Operation(summary = "健康检查", description = "检查文献助手服务状态")
     public String health() {
         return "Literature Assistant is running!";
+    }
+
+    /**
+     * 文献问答接口（SSE 流式响应）
+     */
+    @PostMapping(value = "/ask", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    @Operation(summary = "文献问答", description = "基于文献内容回答用户问题（支持单文献和跨文献检索）")
+    public SseEmitter askQuestion(
+            @Parameter(description = "问答请求", required = true) @Valid @RequestBody LiteratureQuestionRequest request) {
+
+        log.info("收到文献问答请求，问题: {}, 跨文献: {}, 文献ID: {}",
+                request.getQuestion(), request.getCrossDoc(), request.getLiteratureId());
+
+        // 验证 API Key
+        literatureAiService.validateApiKey(request.getApiKey());
+
+        // 处理问答请求
+        return literatureQAService.answerQuestion(request);
     }
 }

@@ -1,7 +1,7 @@
 spring:
   application:
     name: literature-explorer
-  
+
   # Jackson 配置
   jackson:
     date-format: yyyy-MM-dd HH:mm:ss
@@ -11,7 +11,7 @@ spring:
       fail-on-empty-beans: false
     deserialization:
       fail-on-unknown-properties: false
-  
+
   # 文件上传配置
   servlet:
     multipart:
@@ -20,7 +20,7 @@ spring:
 
   # 数据源配置
   datasource:
-    url: jdbc:h2:file:./data/literature_assistant   # 持久化到项目目录下
+    url: jdbc:h2:file:./data/literature_assistant # 持久化到项目目录下
     driver-class-name: org.h2.Driver
     hikari:
       maximum-pool-size: 20
@@ -57,8 +57,8 @@ logging:
     com.yuyuan.literature: debug
     org.springframework.web: info
   pattern:
-    console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
-    file: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
+    console: '%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n'
+    file: '%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n'
   file:
     name: logs/literature-explorer.log
 
@@ -82,7 +82,7 @@ literature:
     upload-path: ./uploads/documents
     max-file-size: 10MB
     allowed-extensions: pdf,doc,docx,md,markdown,xls,xlsx
-  
+
   # AI 配置
   ai:
     # Kimi AI 配置
@@ -91,8 +91,9 @@ literature:
     max-tokens: 20480
     temperature: 0.7
     timeout: 60000
-    
+
     # 系统提示词文件路径配置
     system-prompt-file: classpath:prompts/literature-guide-system-prompt.txt
     excel-prompt-file: classpath:prompts/excel-guide-system-prompt.txt
     classification-prompt-file: classpath:prompts/literature-classification-system-prompt.txt
+    qa-prompt-file: classpath:prompts/literature-qa-system-prompt.txt

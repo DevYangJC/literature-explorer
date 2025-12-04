@@ -142,7 +142,7 @@
       </el-card>
 
       <!-- 阅读指南卡片 -->
-      <el-card class="guide-card" shadow="never">
+      <el-card class="guide-card mb-24" shadow="never">
         <template #header>
           <div class="card-header">
             <h3>AI 阅读指南</h3>
@@ -185,6 +185,158 @@
           </div>
         </div>
       </el-card>
+
+      <!-- 智能问答卡片 -->
+      <el-card class="qa-card" shadow="never">
+        <template #header>
+          <div class="card-header">
+            <h3>💡 智能问答</h3>
+            <el-tag v-if="currentLiterature.status !== 1" type="warning" size="small">
+              需要文献完成AI分析后使用
+            </el-tag>
+          </div>
+        </template>
+        
+        <div class="qa-content">
+          <!-- 问答输入区 -->
+          <div v-if="!isAnswering" class="qa-input-area">
+            <el-form :model="qaForm" label-width="100px">
+              <el-form-item label="提问">
+                <el-input
+                  v-model="qaForm.question"
+                  type="textarea"
+                  :rows="3"
+                  placeholder="例如：这篇文献的核心创新点是什么？"
+                  maxlength="500"
+                  show-word-limit
+                  :disabled="currentLiterature.status !== 1"
+                />
+              </el-form-item>
+              
+              <el-form-item label="检索模式">
+                <el-radio-group v-model="qaForm.crossDoc" :disabled="currentLiterature.status !== 1">
+                  <el-radio :label="false">单文献（仅当前文献）</el-radio>
+                  <el-radio :label="true">跨文献（检索相关文献）</el-radio>
+                </el-radio-group>
+              </el-form-item>
+              
+              <el-form-item v-if="qaForm.crossDoc" label="检索数量">
+                <el-slider
+                  v-model="qaForm.topK"
+                  :min="1"
+                  :max="10"
+                  :marks="{ 1: '1', 3: '3', 5: '5', 10: '10' }"
+                  show-stops
+                />
+              </el-form-item>
+              
+              <el-form-item label="API Key">
+                <el-input
+                  v-model="qaForm.apiKey"
+                  type="password"
+                  placeholder="请输入 Kimi API Key"
+                  show-password
+                  clearable
+                  :disabled="currentLiterature.status !== 1"
+                >
+                  <template #append>
+                    <el-button
+                      v-if="qaForm.apiKey"
+                      @click="clearSavedApiKey"
+                      text
+                      type="danger"
+                      size="small"
+                    >
+                      清除
+                    </el-button>
+                  </template>
+                </el-input>
+                <div class="api-key-tip">
+                  <span class="tip-text">API Key 会自动保存到浏览器本地</span>
+                </div>
+              </el-form-item>
+              
+              <el-form-item>
+                <el-button
+                  type="primary"
+                  @click="handleAsk"
+                  :disabled="!canAsk || currentLiterature.status !== 1"
+                  size="large"
+                >
+                  <el-icon><ChatDotRound /></el-icon>
+                  开始提问
+                </el-button>
+              </el-form-item>
+            </el-form>
+          </div>
+          
+          <!-- 回答展示区 -->
+          <div v-else class="qa-answer-area">
+            <div class="answer-header">
+              <div class="answer-title">
+                <el-icon v-if="!answerComplete" class="loading-icon"><Loading /></el-icon>
+                <el-icon v-else class="success-icon"><CircleCheck /></el-icon>
+                <span>{{ answerComplete ? '回答完成' : '正在生成回答...' }}</span>
+              </div>
+              <div class="header-actions">
+                <el-button
+                  v-if="answerComplete"
+                  size="small"
+                  @click="continueAsk"
+                >
+                  <el-icon><ChatDotRound /></el-icon>
+                  继续提问
+                </el-button>
+                <el-button
+                  v-if="answerComplete && qaHistory.length > 0"
+                  size="small"
+                  @click="resetQA"
+                >
+                  <el-icon><RefreshLeft /></el-icon>
+                  清空对话
+                </el-button>
+              </div>
+            </div>
+            
+            <div v-if="qaProgressMessage" class="progress-message">
+              <el-icon><InfoFilled /></el-icon>
+              {{ qaProgressMessage }}
+            </div>
+            
+            <!-- 对话历史记录 -->
+            <div v-if="qaHistory.length > 0" class="qa-history">
+              <div v-for="(item, index) in qaHistory" :key="index" class="qa-item">
+                <div class="question-box">
+                  <strong>问题 {{ index + 1 }}：</strong>{{ item.question }}
+                </div>
+                <div class="answer-box">
+                  <div class="markdown-content" v-html="item.renderedAnswer"></div>
+                </div>
+              </div>
+            </div>
+            
+            <!-- 当前问答 -->
+            <div class="answer-content">
+              <div class="question-box">
+                <strong>{{ qaHistory.length > 0 ? `问题 ${qaHistory.length + 1}` : '问题' }}：</strong>{{ currentQuestion }}
+              </div>
+              
+              <div class="answer-box">
+                <div
+                  ref="answerContentRef"
+                  class="markdown-content"
+                  v-html="renderedAnswer"
+                ></div>
+                <span v-if="isStreaming" class="typing-cursor">|</span>
+              </div>
+            </div>
+            
+            <div v-if="qaError" class="error-message">
+              <el-alert :title="qaError" type="error" :closable="false" />
+            </div>
+          </div>
+        </div>
+      </el-card>
     </div>
 
     <!-- 未找到文献 -->
@@ -193,13 +345,14 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, nextTick, watchEffect } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick, watchEffect, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useLiteratureStore } from '@/stores/literatureStore'
 import { ElMessage } from 'element-plus'
 import { marked } from 'marked'
 import mermaid from 'mermaid'
-import { ArrowLeft, FullScreen, Close, Download, Document } from '@element-plus/icons-vue'
+import { ArrowLeft, FullScreen, Close, Download, Document, ChatDotRound, Loading, CircleCheck, RefreshLeft, InfoFilled } from '@element-plus/icons-vue'
+import { fetchEventSource } from '@microsoft/fetch-event-source'
 
 const route = useRoute()
 const router = useRouter()
@@ -207,12 +360,38 @@ const literatureStore = useLiteratureStore()
 
 // 响应式数据
 const guideContentRef = ref()
+const answerContentRef = ref()
 const isFullscreen = ref(false)
 const downloading = ref(false)
 const exportingMarkdown = ref(false)
 
+// 问答相关状态
+const qaForm = ref({
+  question: '',
+  apiKey: '',
+  crossDoc: false,
+  topK: 5
+})
+const isAnswering = ref(false)
+const isStreaming = ref(false)
+const answerComplete = ref(false)
+const currentQuestion = ref('')
+const streamingAnswer = ref('')
+const renderedAnswer = ref('')
+const qaProgressMessage = ref('')
+const qaError = ref('')
+const qaHistory = ref([]) // 对话历史
+let abortController = null
+
+// API Key 存储相关
+const API_KEY_STORAGE_KEY = 'literature_assistant_api_key'
+
 // 计算属性
 const currentLiterature = computed(() => literatureStore.currentLiterature)
+
+const canAsk = computed(() => {
+  return qaForm.value.question.trim() && qaForm.value.apiKey.trim()
+})
 
 const renderedGuide = computed(() => {
   if (!currentLiterature.value?.readingGuideSummary) return ''
@@ -410,6 +589,299 @@ const exportReadingGuide = async () => {
   }
 }
 
+// ==================== 问答功能 ====================
+
+// 加载保存的 API Key
+const loadSavedApiKey = () => {
+  try {
+    const savedKey = localStorage.getItem(API_KEY_STORAGE_KEY)
+    if (savedKey) {
+      qaForm.value.apiKey = savedKey
+    }
+  } catch (error) {
+    console.warn('读取保存的 API Key 失败:', error)
+  }
+}
+
+// 保存 API Key
+const saveApiKey = (apiKey) => {
+  try {
+    if (apiKey && apiKey.trim()) {
+      localStorage.setItem(API_KEY_STORAGE_KEY, apiKey.trim())
+    }
+  } catch (error) {
+    console.warn('保存 API Key 失败:', error)
+  }
+}
+
+// 清除保存的 API Key
+const clearSavedApiKey = () => {
+  try {
+    localStorage.removeItem(API_KEY_STORAGE_KEY)
+    qaForm.value.apiKey = ''
+    ElMessage.success('已清除保存的 API Key')
+  } catch (error) {
+    console.warn('清除保存的 API Key 失败:', error)
+    ElMessage.error('清除失败，请重试')
+  }
+}
+
+// 处理提问
+const handleAsk = async () => {
+  if (!canAsk.value) {
+    ElMessage.warning('请输入问题和 API Key')
+    return
+  }
+
+  if (currentLiterature.value.status !== 1) {
+    ElMessage.warning('请等待文献完成AI分析')
+    return
+  }
+
+  // 保存 API Key
+  saveApiKey(qaForm.value.apiKey)
+
+  // 重置状态
+  isAnswering.value = true
+  isStreaming.value = true
+  answerComplete.value = false
+  currentQuestion.value = qaForm.value.question
+  streamingAnswer.value = ''
+  renderedAnswer.value = ''
+  qaProgressMessage.value = ''
+  qaError.value = ''
+
+  // 连接 SSE
+  await connectQASSE()
+}
+
+// 连接问答 SSE
+const connectQASSE = async () => {
+  try {
+    abortController = new AbortController()
+
+    const requestBody = {
+      question: qaForm.value.question,
+      apiKey: qaForm.value.apiKey,
+      literatureId: qaForm.value.crossDoc ? null : currentLiterature.value.id,
+      crossDoc: qaForm.value.crossDoc,
+      topK: qaForm.value.crossDoc ? qaForm.value.topK : 5
+    }
+
+    await fetchEventSource('/api/literature/ask', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'text/event-stream',
+        'Cache-Control': 'no-cache'
+      },
+      body: JSON.stringify(requestBody),
+      signal: abortController.signal,
+      openWhenHidden: true,
+
+      async onopen(response) {
+        if (response.ok && response.headers.get('content-type')?.includes('text/event-stream')) {
+          console.log('QA SSE 连接已建立')
+        } else {
+          const errorText = await response.text()
+          throw new Error(`HTTP ${response.status}: ${response.statusText}${errorText ? ` - ${errorText}` : ''}`)
+        }
+      },
+
+      onmessage(event) {
+        try {
+          handleQASSEEvent(event)
+        } catch (error) {
+          console.error('处理 QA SSE 事件失败:', error)
+        }
+      },
+
+      onerror(error) {
+        console.error('QA SSE 错误:', error)
+        qaError.value = '连接失败，请重试'
+        isStreaming.value = false
+        throw error
+      },
+
+      onclose() {
+        console.log('QA SSE 连接关闭')
+      }
+    })
+
+  } catch (error) {
+    console.error('问答失败:', error)
+    if (!abortController?.signal.aborted) {
+      qaError.value = error.message || '问答失败，请重试'
+      isStreaming.value = false
+    }
+  }
+}
+
+// 处理 QA SSE 事件
+const handleQASSEEvent = (event) => {
+  const { event: eventType, data } = event
+
+  switch (eventType) {
+    case 'start':
+      qaProgressMessage.value = data || '开始处理问题...'
+      break
+
+    case 'progress':
+      qaProgressMessage.value = data || '正在处理...'
+      break
+
+    case 'content':
+      const processedContent = data
+        .replace(/<empty-line>/g, '\n')
+        .replace(/<empty-space>/g, ' ')
+      streamingAnswer.value += processedContent
+      renderAnswerMarkdown()
+      scrollAnswerToBottom()
+      break
+
+    case 'complete':
+      isStreaming.value = false
+      answerComplete.value = true
+      qaProgressMessage.value = ''
+      
+      // 保存当前问答到历史
+      qaHistory.value.push({
+        question: currentQuestion.value,
+        answer: streamingAnswer.value,
+        renderedAnswer: renderedAnswer.value
+      })
+      
+      ElMessage.success('回答完成')
+      break
+
+    case 'error':
+      qaError.value = data || '处理失败'
+      isStreaming.value = false
+      break
+
+    default:
+      console.warn('未知的 SSE 事件类型:', eventType)
+  }
+}
+
+// 渲染答案 Markdown
+const renderAnswerMarkdown = () => {
+  if (!streamingAnswer.value) {
+    renderedAnswer.value = ''
+    return
+  }
+
+  try {
+    marked.setOptions({
+      breaks: true,
+      gfm: true
+    })
+    renderedAnswer.value = marked(streamingAnswer.value)
+  } catch (error) {
+    console.error('Markdown 渲染错误:', error)
+    renderedAnswer.value = streamingAnswer.value
+  }
+}
+
+// 滚动答案到底部
+const scrollAnswerToBottom = async () => {
+  await nextTick()
+  if (answerContentRef.value) {
+    answerContentRef.value.scrollTo({
+      top: answerContentRef.value.scrollHeight,
+      behavior: 'smooth'
+    })
+  }
+}
+
+// 重置问答状态
+const resetQA = () => {
+  if (abortController) {
+    abortController.abort()
+    abortController = null
+  }
+
+  isAnswering.value = false
+  isStreaming.value = false
+  answerComplete.value = false
+  currentQuestion.value = ''
+  streamingAnswer.value = ''
+  renderedAnswer.value = ''
+  qaProgressMessage.value = ''
+  qaError.value = ''
+  qaHistory.value = [] // 清空历史
+  qaForm.value.question = '' // 清空问题输入框
+}
+
+// 继续提问
+const continueAsk = () => {
+  // 仅重置当前问答状态，保留历史
+  isAnswering.value = false
+  isStreaming.value = false
+  answerComplete.value = false
+  currentQuestion.value = ''
+  streamingAnswer.value = ''
+  renderedAnswer.value = ''
+  qaProgressMessage.value = ''
+  qaError.value = ''
+  qaForm.value.question = '' // 清空问题输入框
+}
+
+// 监听历史记录变化，渲染历史中的 Mermaid 图表
+watch(() => qaHistory.value.length, async () => {
+  if (qaHistory.value.length > 0) {
+    await nextTick()
+    // 渲染所有历史记录中的 Mermaid
+    const historyItems = document.querySelectorAll('.qa-history .qa-item .answer-box')
+    for (const item of historyItems) {
+      await renderMermaidInAnswer(item)
+    }
+  }
+})
+
+// 监听答案变化，渲染 Mermaid 图表
+watch(renderedAnswer, async () => {
+  if (renderedAnswer.value && answerContentRef.value) {
+    await nextTick()
+    await renderMermaidInAnswer(answerContentRef.value)
+  }
+})
+
+// 在答案区域渲染 Mermaid 图表
+const renderMermaidInAnswer = async (container) => {
+  if (!container) return
+  
+  // 查找并渲染 mermaid 图表
+  const mermaidBlocks = container.querySelectorAll('pre code.language-mermaid:not([data-processed]), code.language-mermaid:not([data-processed])')
+  for (let i = 0; i < mermaidBlocks.length; i++) {
+    const block = mermaidBlocks[i]
+    const code = block.textContent || block.innerText
+
+    try {
+      if (!isValidMermaidSyntax(code)) continue
+      
+      // 标记为已处理
+      block.setAttribute('data-processed', 'true')
+
+      const mermaidContainer = document.createElement('div')
+      mermaidContainer.className = 'mermaid-container'
+      mermaidContainer.id = `qa-mermaid-${Date.now()}-${i}`
+
+      const { svg } = await mermaid.render(mermaidContainer.id, code)
+      mermaidContainer.innerHTML = svg
+
+      const parent = block.parentElement
+      if (parent && parent.tagName === 'PRE' && parent.parentNode) {
+        parent.parentNode.replaceChild(mermaidContainer, parent)
+      } else if (block.parentNode) {
+        block.parentNode.replaceChild(mermaidContainer, block)
+      }
+    } catch (error) {
+      console.error('Mermaid 渲染错误:', error)
+    }
+  }
+}
+
 // HTML 转义函数
 const escapeHtml = (text) => {
   return text
@@ -488,6 +960,9 @@ const renderMermaidCharts = async () => {
   
   if (!guideContentRef.value) return
   
+  // 首先清理任何现有的 Mermaid 错误信息
+  cleanupMermaidErrors()
+  
   // 查找所有 mermaid 代码块
   const mermaidBlocks = guideContentRef.value.querySelectorAll('pre code.language-mermaid, code.language-mermaid')
   
@@ -542,6 +1017,136 @@ const renderMermaidCharts = async () => {
       }
     }
   }
+  
+  // 渲染完成后清理可能出现的错误信息
+  setTimeout(() => {
+    cleanupMermaidErrors()
+  }, 100)
+  
+  setTimeout(() => {
+    cleanupMermaidErrors()
+  }, 500)
+}
+
+// 清理 Mermaid 错误信息
+const cleanupMermaidErrors = () => {
+  if (!guideContentRef.value) return
+  
+  try {
+    // 清理全局的Mermaid临时元素
+    cleanupGlobalMermaidElements()
+    
+    // 查找并移除所有可能的错误信息元素
+    const errorSelectors = [
+      '[class*="error"]',
+      '[class*="mermaid-error"]',
+      '.mermaid-syntax-error',
+      '.error-text',
+      'div[style*="color: red"]',
+      'div[style*="color:red"]',
+      'span[style*="color: red"]',
+      'span[style*="color:red"]'
+    ]
+    
+    errorSelectors.forEach(selector => {
+      const elements = guideContentRef.value.querySelectorAll(selector)
+      elements.forEach(element => {
+        const text = element.textContent || ''
+        if (text.includes('Syntax error') || 
+            text.includes('Parse error') || 
+            text.includes('mermaid version') || 
+            text.includes('Expecting') ||
+            text.includes('error in text')) {
+          element.remove()
+        }
+      })
+    })
+    
+    // 更全面地移除包含错误文本的元素
+    const allElements = guideContentRef.value.querySelectorAll('*')
+    allElements.forEach(element => {
+      const text = element.textContent || ''
+      const innerHTML = element.innerHTML || ''
+      
+      // 检查是否是 Mermaid 错误元素
+      if ((text.includes('Syntax error in text') && text.includes('mermaid version')) ||
+          (text.includes('Parse error') && text.includes('mermaid')) ||
+          innerHTML.includes('mermaid version 10.9.4')) {
+        
+        // 如果是直接的错误元素，移除它
+        if (element.children.length === 0 || 
+            (element.children.length === 1 && element.children[0].tagName === 'BR')) {
+          element.remove()
+        } else {
+          // 如果包含其他内容，只清空错误文本
+          const walker = document.createTreeWalker(
+            element,
+            NodeFilter.SHOW_TEXT,
+            null,
+            false
+          )
+          
+          const textNodesToRemove = []
+          let node
+          
+          while (node = walker.nextNode()) {
+            const nodeText = node.textContent || ''
+            if (nodeText.includes('Syntax error in text') || 
+                nodeText.includes('mermaid version') ||
+                nodeText.includes('Parse error on line')) {
+              textNodesToRemove.push(node)
+            }
+          }
+          
+          textNodesToRemove.forEach(textNode => {
+            if (textNode.parentNode) {
+              textNode.parentNode.removeChild(textNode)
+            }
+          })
+        }
+      }
+    })
+    
+  } catch (error) {
+    console.warn('清理 Mermaid 错误信息时出错:', error)
+  }
+}
+
+// 清理全局Mermaid临时元素
+const cleanupGlobalMermaidElements = () => {
+  try {
+    // 清理body下的所有mermaid临时元素
+    const globalSelectors = [
+      'div[id*="dmermaid-modal-"]',
+      'div[id*="mermaid-modal-"]',
+      'div[id^="d"]', // Mermaid有时会创建以'd'开头的临时元素
+      '.mermaid[style*="max-width: 512px"]' // 清理可能的临时mermaid元素
+    ]
+    
+    globalSelectors.forEach(selector => {
+      const elements = document.body.querySelectorAll(selector)
+      elements.forEach(element => {
+        // 检查是否是Mermaid相关的临时元素
+        const id = element.id || ''
+        const className = element.className || ''
+        
+        if (id.includes('mermaid-modal-') || 
+            id.includes('dmermaid-modal-') ||
+            (id.length > 10 && /^d[0-9-]+/.test(id)) ||
+            className.includes('mermaid')) {
+          
+          // 确保不是用户内容区域的元素
+          if (!element.closest('.markdown-content') && 
+              !element.closest('.guide-content')) {
+            console.log('清理Mermaid临时元素:', element.id || element.className)
+            element.remove()
+          }
+        }
+      })
+    })
+  } catch (error) {
+    console.warn('清理全局Mermaid元素时出错:', error)
+  }
 }
 
 // 监听渲染指南变化，重新渲染 Mermaid 图表
@@ -549,6 +1154,10 @@ const handleGuideRendered = async () => {
   if (renderedGuide.value) {
     await nextTick()
     await renderMermaidCharts()
+    // 渲染后再次清理错误
+    setTimeout(() => {
+      cleanupMermaidErrors()
+    }, 200)
   }
 }
 
@@ -569,6 +1178,33 @@ onMounted(async () => {
     }
   })
   
+  // 拦截 Mermaid 的错误输出
+  const originalConsoleError = console.error
+  const originalConsoleWarn = console.warn
+  
+  console.error = function(...args) {
+    // 过滤 Mermaid 相关的错误输出
+    const message = args.join(' ')
+    if (message.includes('Mermaid') || message.includes('mermaid') || 
+        message.includes('Parse error') || message.includes('Expecting')) {
+      // 静默处理 Mermaid 错误，不输出到控制台
+      return
+    }
+    originalConsoleError.apply(console, args)
+  }
+  
+  console.warn = function(...args) {
+    // 过滤 Mermaid 相关的警告输出
+    const message = args.join(' ')
+    if (message.includes('Mermaid') || message.includes('mermaid')) {
+      return
+    }
+    originalConsoleWarn.apply(console, args)
+  }
+  
+  // 加载保存的 API Key
+  loadSavedApiKey()
+  
   // 获取文献详情
   const literatureId = route.params.id
   if (literatureId) {
@@ -584,6 +1220,10 @@ onUnmounted(() => {
     // 清理ESC键监听
     document.removeEventListener('keydown', handleEscapeKey)
   }
+  
+  // 最后一次清理 Mermaid 错误
+  cleanupMermaidErrors()
+  cleanupGlobalMermaidElements()
   
   // 清理当前文献数据
   literatureStore.clearCurrentLiterature()
@@ -928,6 +1568,165 @@ onUnmounted(() => {
   line-height: 1.4;
   color: #333;
   max-height: 200px;
+  overflow-y: auto;
+}
+
+/* ==================== 问答面板样式 ==================== */
+
+.qa-card {
+  border: 1px solid #ebeef5;
+}
+
+.qa-content {
+  min-height: 200px;
+}
+
+.qa-input-area {
+  padding: 8px 0;
+}
+
+.api-key-tip {
+  margin-top: 4px;
+}
+
+.tip-text {
+  font-size: 12px;
+  color: #909399;
+}
+
+.qa-answer-area {
+  padding: 8px 0;
+}
+
+.answer-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #ebeef5;
+}
+
+.header-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.answer-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 16px;
+  font-weight: 500;
+  color: #2c3e50;
+}
+
+.loading-icon {
+  color: #409eff;
+  animation: rotating 2s linear infinite;
+}
+
+.success-icon {
+  color: #67c23a;
+}
+
+@keyframes rotating {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.progress-message {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px;
+  background: #ecf5ff;
+  border: 1px solid #d9ecff;
+  border-radius: 4px;
+  margin-bottom: 16px;
+  color: #409eff;
+  font-size: 14px;
+}
+
+.answer-content {
+  margin-top: 16px;
+}
+
+.question-box {
+  padding: 12px 16px;
+  background: #f5f7fa;
+  border-left: 4px solid #409eff;
+  border-radius: 4px;
+  margin-bottom: 16px;
+  color: #303133;
+  font-size: 14px;
+}
+
+.question-box strong {
+  color: #409eff;
+  margin-right: 8px;
+}
+
+.answer-box {
+  position: relative;
+  padding: 16px;
+  background: #fff;
+  border: 1px solid #ebeef5;
+  border-radius: 8px;
+  min-height: 100px;
+  max-height: 600px;
+  overflow-y: auto;
+}
+
+.typing-cursor {
+  display: inline-block;
+  margin-left: 2px;
+  animation: blink 1s infinite;
+  font-weight: bold;
+  color: #409eff;
+}
+
+@keyframes blink {
+  0%, 50% {
+    opacity: 1;
+  }
+  51%, 100% {
+    opacity: 0;
+  }
+}
+
+.error-message {
+  margin-top: 16px;
+}
+
+/* 对话历史样式 */
+.qa-history {
+  margin-bottom: 24px;
+}
+
+.qa-item {
+  margin-bottom: 20px;
+  padding-bottom: 20px;
+  border-bottom: 1px dashed #e4e7ed;
+}
+
+.qa-item:last-child {
+  border-bottom: none;
+}
+
+.qa-item .question-box {
+  background: #f0f2f5;
+  border-left-color: #909399;
+}
+
+.qa-item .answer-box {
+  background: #fafafa;
+  border: 1px solid #f0f0f0;
+  max-height: 400px;
   overflow-y: auto;
 }
 </style>
