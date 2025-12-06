@@ -259,7 +259,7 @@ import { useLiteratureStore } from '@/stores/literatureStore'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import ImportLiteratureModal from '@/components/ImportLiteratureModal.vue'
 import BatchImportModal from '@/components/BatchImportModal.vue'
-import { Plus, Search, Refresh, Download, Upload, Delete } from '@element-plus/icons-vue'
+import { Plus, Search, Refresh, Download, Upload, Delete, Document, ArrowDown } from '@element-plus/icons-vue'
 
 const router = useRouter()
 const literatureStore = useLiteratureStore()
@@ -269,6 +269,7 @@ const showImportModal = ref(false)
 const showBatchImportModal = ref(false)
 const dateRange = ref([])
 const downloadingIds = ref(new Set())
+const exportingIds = ref(new Set())
 const selectedRows = ref([])
 const deleting = ref(false)
 const currentDeletingId = ref(null)
@@ -417,6 +418,141 @@ const downloadFile = async (literature) => {
   } finally {
     // 从下载中的ID集合移除
     downloadingIds.value.delete(literature.id)
+  }
+}
+
+// 处理导出命令
+const handleExportCommand = async (command, literature) => {
+  if (command === 'markdown') {
+    await exportReadingGuideMarkdown(literature)
+  } else if (command === 'word') {
+    await exportReadingGuideWord(literature)
+  }
+}
+
+// 导出阅读指南为Markdown
+const exportReadingGuideMarkdown = async (literature) => {
+  if (exportingIds.value.has(literature.id)) {
+    return
+  }
+
+  try {
+    // 添加到导出中的ID集合
+    exportingIds.value.add(literature.id)
+
+    // 创建下载链接
+    const exportUrl = `/api/literature/${literature.id}/export-reading-guide`
+
+    // 使用fetch检查文件是否存在
+    const response = await fetch(exportUrl, {
+      method: 'HEAD',
+      headers: {
+        'Accept': 'text/markdown'
+      }
+    })
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+    }
+
+    // 创建临时链接进行下载
+    const link = document.createElement('a')
+    link.href = exportUrl
+    link.download = literature.originalName.replace(/\.[^/.]+$/, '') + '_阅读指南.md'
+    link.style.display = 'none'
+
+    // 添加到页面并触发下载
+    document.body.appendChild(link)
+    link.click()
+
+    // 清理
+    document.body.removeChild(link)
+
+    // 提示导出开始
+    ElMessage.success(`${literature.originalName} Markdown 阅读指南导出已开始`)
+
+  } catch (error) {
+    console.error('导出Markdown失败:', error)
+
+    // 根据错误类型显示不同的提示
+    let errorMessage = '导出阅读指南失败，请重试'
+    if (error.message.includes('404')) {
+      errorMessage = '阅读指南不存在或文献尚未处理完成'
+    } else if (error.message.includes('403')) {
+      errorMessage = '没有权限导出该阅读指南'
+    } else if (error.message.includes('400')) {
+      errorMessage = '文献暂无阅读指南，请等待处理完成'
+    } else if (error.message.includes('500')) {
+      errorMessage = '服务器错误，请稍后重试'
+    }
+
+    ElMessage.error(errorMessage)
+  } finally {
+    // 从导出中的ID集合移除
+    exportingIds.value.delete(literature.id)
+  }
+}
+
+// 导出阅读指南为Word
+const exportReadingGuideWord = async (literature) => {
+  if (exportingIds.value.has(literature.id)) {
+    return
+  }
+
+  try {
+    // 添加到导出中的ID集合
+    exportingIds.value.add(literature.id)
+
+    // 创建下载链接
+    const exportUrl = `/api/literature/${literature.id}/export-reading-guide-word`
+
+    // 使用fetch检查文件是否存在
+    const response = await fetch(exportUrl, {
+      method: 'HEAD',
+      headers: {
+        'Accept': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+      }
+    })
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+    }
+
+    // 创建临时链接进行下载
+    const link = document.createElement('a')
+    link.href = exportUrl
+    link.download = literature.originalName.replace(/\.[^/.]+$/, '') + '_阅读指南.docx'
+    link.style.display = 'none'
+
+    // 添加到页面并触发下载
+    document.body.appendChild(link)
+    link.click()
+
+    // 清理
+    document.body.removeChild(link)
+
+    // 提示导出开始
+    ElMessage.success(`${literature.originalName} Word 阅读指南导出已开始`)
+
+  } catch (error) {
+    console.error('导出Word失败:', error)
+
+    // 根据错误类型显示不同的提示
+    let errorMessage = '导出Word阅读指南失败，请重试'
+    if (error.message.includes('404')) {
+      errorMessage = '阅读指南不存在或文献尚未处理完成'
+    } else if (error.message.includes('403')) {
+      errorMessage = '没有权限导出该阅读指南'
+    } else if (error.message.includes('400')) {
+      errorMessage = '文献暂无阅读指南，请等待处理完成'
+    } else if (error.message.includes('500')) {
+      errorMessage = '服务器错误，请稍后重试'
+    }
+
+    ElMessage.error(errorMessage)
+  } finally {
+    // 从导出中的ID集合移除
+    exportingIds.value.delete(literature.id)
   }
 }
 

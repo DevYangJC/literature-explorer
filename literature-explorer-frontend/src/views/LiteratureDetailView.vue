@@ -32,16 +32,34 @@
           <div class="card-header">
             <h3>基本信息</h3>
             <div class="button-group">
-              <el-button
+              <el-dropdown
                 v-if="currentLiterature.status === 1"
-                type="success"
-                size="small"
-                @click="exportReadingGuide"
-                :loading="exportingMarkdown"
+                trigger="click"
+                @command="handleExportCommand"
+                :disabled="exportingMarkdown || exportingWord"
               >
-                <el-icon><Document /></el-icon>
-                导出指南
-              </el-button>
+                <el-button
+                  type="success"
+                  size="small"
+                  :loading="exportingMarkdown || exportingWord"
+                >
+                  <el-icon><Document /></el-icon>
+                  导出指南
+                  <el-icon class="el-icon--right"><ArrowDown /></el-icon>
+                </el-button>
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item command="markdown">
+                      <el-icon><Document /></el-icon>
+                      Markdown 格式
+                    </el-dropdown-item>
+                    <el-dropdown-item command="word">
+                      <el-icon><Document /></el-icon>
+                      Word 文档
+                    </el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
               <el-button
                 type="primary"
                 size="small"
@@ -448,7 +466,7 @@ import { useLiteratureStore } from '@/stores/literatureStore'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { marked } from 'marked'
 import mermaid from 'mermaid'
-import { ArrowLeft, FullScreen, Close, Download, Document, ChatDotRound, Loading, CircleCheck, RefreshLeft, InfoFilled, Clock, Delete } from '@element-plus/icons-vue'
+import { ArrowLeft, FullScreen, Close, Download, Document, ArrowDown, ChatDotRound, Loading, CircleCheck, RefreshLeft, InfoFilled, Clock, Delete } from '@element-plus/icons-vue'
 import { fetchEventSource } from '@microsoft/fetch-event-source'
 
 const route = useRoute()
@@ -461,6 +479,7 @@ const answerContentRef = ref()
 const isFullscreen = ref(false)
 const downloading = ref(false)
 const exportingMarkdown = ref(false)
+const exportingWord = ref(false)
 
 // 问答相关状态
 const qaForm = ref({
@@ -634,7 +653,17 @@ const downloadFile = async () => {
 }
 
 // 导出阅读指南为Markdown
-const exportReadingGuide = async () => {
+// 处理导出命令
+const handleExportCommand = async (command) => {
+  if (command === 'markdown') {
+    await exportReadingGuideMarkdown()
+  } else if (command === 'word') {
+    await exportReadingGuideWord()
+  }
+}
+
+// 导出阅读指南为Markdown
+const exportReadingGuideMarkdown = async () => {
   if (!currentLiterature.value || exportingMarkdown.value) {
     return
   }
@@ -671,7 +700,7 @@ const exportReadingGuide = async () => {
     document.body.removeChild(link)
 
     // 提示导出开始
-    ElMessage.success('阅读指南导出已开始')
+    ElMessage.success('Markdown 阅读指南导出已开始')
 
   } catch (error) {
     console.error('导出Markdown失败:', error)
@@ -691,6 +720,67 @@ const exportReadingGuide = async () => {
     ElMessage.error(errorMessage)
   } finally {
     exportingMarkdown.value = false
+  }
+}
+
+// 导出阅读指南为Word
+const exportReadingGuideWord = async () => {
+  if (!currentLiterature.value || exportingWord.value) {
+    return
+  }
+
+  try {
+    exportingWord.value = true
+
+    // 创建下载链接
+    const exportUrl = `/api/literature/${currentLiterature.value.id}/export-reading-guide-word`
+
+    // 使用fetch检查文件是否存在
+    const response = await fetch(exportUrl, {
+      method: 'HEAD',
+      headers: {
+        'Accept': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+      }
+    })
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+    }
+
+    // 创建临时链接进行下载
+    const link = document.createElement('a')
+    link.href = exportUrl
+    link.download = currentLiterature.value.originalName.replace(/\.[^/.]+$/, '') + '_阅读指南.docx'
+    link.style.display = 'none'
+
+    // 添加到页面并触发下载
+    document.body.appendChild(link)
+    link.click()
+
+    // 清理
+    document.body.removeChild(link)
+
+    // 提示导出开始
+    ElMessage.success('Word 阅读指南导出已开始')
+
+  } catch (error) {
+    console.error('导出Word失败:', error)
+
+    // 根据错误类型显示不同的提示
+    let errorMessage = '导出Word阅读指南失败，请重试'
+    if (error.message.includes('404')) {
+      errorMessage = '阅读指南不存在或文献尚未处理完成'
+    } else if (error.message.includes('403')) {
+      errorMessage = '没有权限导出该阅读指南'
+    } else if (error.message.includes('400')) {
+      errorMessage = '文献暂无阅读指南，请等待处理完成'
+    } else if (error.message.includes('500')) {
+      errorMessage = '服务器错误，请稍后重试'
+    }
+
+    ElMessage.error(errorMessage)
+  } finally {
+    exportingWord.value = false
   }
 }
 

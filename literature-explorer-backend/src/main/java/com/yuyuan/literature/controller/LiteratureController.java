@@ -8,6 +8,7 @@ import com.yuyuan.literature.dto.LiteratureQueryRequest;
 import com.yuyuan.literature.dto.LiteratureQuestionRequest;
 import com.yuyuan.literature.dto.LiteratureVO;
 import com.yuyuan.literature.entity.Literature;
+import com.yuyuan.literature.service.DocumentExportService;
 import com.yuyuan.literature.service.FileProcessingService;
 import com.yuyuan.literature.service.LiteratureAiService;
 import com.yuyuan.literature.service.LiteratureQAService;
@@ -51,7 +52,10 @@ public class LiteratureController {
     private final LiteratureService literatureService;
 
     @Autowired
-    private  LiteratureQAService literatureQAService;
+    private LiteratureQAService literatureQAService;
+
+    @Autowired
+    private DocumentExportService documentExportService;
 
     /**
      * 生成文献阅读指南
@@ -296,5 +300,29 @@ public class LiteratureController {
 
         // 处理问答请求
         return literatureQAService.answerQuestion(request);
+    }
+
+    /**
+     * 导出文献阅读指南为Word文档
+     */
+    @GetMapping("/{id}/export-reading-guide-word")
+    @Operation(summary = "导出文献阅读指南为Word文档", description = "根据文献ID导出阅读指南为Word格式")
+    public void exportReadingGuideWord(
+            @Parameter(description = "文献ID", required = true) @PathVariable @NotNull(message = "文献ID不能为空") Long id,
+            jakarta.servlet.http.HttpServletResponse response) {
+
+        log.info("导出文献阅读指南为Word文档，文献ID: {}", id);
+
+        try {
+            documentExportService.exportReadingGuideToWord(id, response);
+        } catch (IOException e) {
+            log.error("导出Word文档失败，文献ID: {}", id, e);
+            response.setStatus(500);
+            try {
+                response.getWriter().write("导出Word文档失败: " + e.getMessage());
+            } catch (IOException ioException) {
+                log.error("写入错误响应失败", ioException);
+            }
+        }
     }
 }
